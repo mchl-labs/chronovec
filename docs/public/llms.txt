@@ -1,0 +1,154 @@
+# ChronoVec
+
+> Vector memory for data that changes.
+
+ChronoVec is an approximate-nearest-neighbour index for mutable agent memory and RAG workloads, with snapshot isolation, atomic insert batches, bounded deletion, and branchable memory. Every record carries a version interval, so queries can read the index as of any past moment. Agents can fork memory, explore speculatively, and discard or merge, all without rebuilding the index.
+
+## Installation
+
+```bash
+pip install chronovec
+```
+
+## Core classes
+
+- `Collection`: high-level API: string IDs, metadata, filters, `snapshot()`. The default choice.
+- `AgentMemory`: branching memory: fork, speculate, discard or merge. For agentic workloads.
+- `AsyncCollection`: asyncio wrapper around `Collection` for FastAPI / async frameworks.
+- `Index`: raw engine: int64 IDs, NumPy vectors, maximum throughput.
+
+## Docs
+
+- [Getting started](https://mchl-labs.github.io/chronovec/getting-started): Install, build, 3-minute tour
+- [Migrating from Chroma](https://mchl-labs.github.io/chronovec/migration-from-chroma): Familiar API and versioned-memory migration path
+- [API reference](https://mchl-labs.github.io/chronovec/api-reference): All public classes and methods
+- [Agent memory](https://mchl-labs.github.io/chronovec/use-cases/agent-memory): Branching, speculation, time travel
+- [RAG with history](https://mchl-labs.github.io/chronovec/use-cases/rag-with-history): Snapshot-isolated retrieval
+- [Architecture](https://mchl-labs.github.io/chronovec/architecture): MVCC, page structure, reclamation
+- [LangChain integration](https://mchl-labs.github.io/chronovec/integrations/langchain): VectorStore subclass with branching
+- [LlamaIndex integration](https://mchl-labs.github.io/chronovec/integrations/llamaindex): Node storage with snapshot reads
+- [LangGraph integration](https://mchl-labs.github.io/chronovec/integrations/langgraph): One graph thread_id per isolated branch
+- [Tree-search agents (LATS)](https://mchl-labs.github.io/chronovec/use-cases/lats): Worked pattern, not a packaged integration; every search trajectory owns a live branch delta
+
+## Quick examples
+
+### Text search with metadata filter
+
+```python
+from chronovec import Collection
+
+col = Collection(dimensions=384, embedding_function=my_embed)
+col.add(ids=["a"], documents=["user prefers dark mode"], metadatas=[{"kind": "pref"}])
+results = col.query(query_text="appearance settings", k=5, where={"kind": "pref"})
+for r in results:
+    print(r.id, r.distance, r.document, r.metadata)
+```
+
+### Custom text embedding
+
+```python
+from chronovec import Collection, CustomEmbedding
+
+embedding = CustomEmbedding(
+    embed_documents=my_embed_documents,
+    embed_query=my_embed_query,
+)
+col = Collection(384, embedding_function=embedding)
+col.add(ids=["a"], documents=["user prefers dark mode"])
+results = col.query(query_text="appearance settings", k=5)
+```
+
+ChronoVec also accepts objects with `embed_documents`/`embed_query` or
+LlamaIndex-style `get_text_embedding_batch`/`get_query_embedding` methods.
+Provider packages remain application choices rather than ChronoVec
+dependencies.
+
+For local Sentence Transformers:
+
+```bash
+pip install "chronovec[sentence-transformers]"
+```
+
+```python
+from chronovec import SentenceTransformerEmbedding
+
+embedding = SentenceTransformerEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+```
+
+For hosted providers, ChronoVec wraps LiteLLM so one adapter covers OpenAI,
+Cohere, Bedrock, Azure, and the rest of LiteLLM's provider list:
+
+```bash
+pip install "chronovec[litellm]"
+```
+
+```python
+import os
+
+from chronovec import ProviderEmbedding
+
+embedding = ProviderEmbedding(
+    provider="openai",
+    model="text-embedding-3-small",
+    api_key=os.environ["OPENAI_API_KEY"],
+)
+```
+
+### Snapshot: query the past
+
+```python
+t = col.snapshot()                               # capture state before a write
+col.add(ids=["a"], documents=["new version"])    # overwrite
+old = col.query(query_text="...", snapshot=t)   # "a" returns old version here
+```
+
+### Async (FastAPI / asyncio)
+
+```python
+from chronovec import AsyncCollection
+
+col = AsyncCollection(384, embedding_function=my_embed)
+results = await col.query(query_text="...", k=5)
+```
+
+### Agent memory with branching
+
+```python
+from chronovec import AgentMemory
+
+mem = AgentMemory(384)
+mem.add("fact-1", embedding, text="user writes Python")
+
+branch = mem.branch("hypothesis")
+branch.add("guess-1", other_emb, text="user might prefer TypeScript")
+
+for hit, record in branch.search(query):   # sees both
+    print(record.id, hit.distance)
+
+mem.search(query)    # never saw the speculation
+branch.discard()     # abandon speculation; purge later at a safe horizon
+```
+
+### Persistence (crash recovery)
+
+```python
+col = Collection(384, wal_path="memory.wal", embedding_function=my_embed)
+# Restart after a crash: WAL replays automatically, nothing lost
+col = Collection(384, wal_path="memory.wal", embedding_function=my_embed)
+```
+
+### Persistence (explicit checkpoint) and disk-backed growth
+
+```python
+col.save("snapshot")                                       # snapshot.cvec + snapshot.meta
+restored = Collection.load("snapshot", embedding_function=my_embed)
+
+# arena_path + max_vectors: disk-backed, kernel-evictable vector storage.
+# With wal_path also set, the arena grows automatically (max_vectors * growth_factor)
+# when it fills, instead of raising MemoryError.
+col = Collection(384, wal_path="mem.wal", arena_path="mem.arena", max_vectors=100_000)
+```
+
+## Claude Code skill
+
+A Claude Code skill at `.claude/skills/chronovec/chronovec/SKILL.md` teaches coding agents the full API: snapshot timing, branch lifecycle, filter operators, and footguns. Invoke it with `/chronovec`.

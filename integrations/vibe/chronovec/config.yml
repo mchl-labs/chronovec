@@ -1,0 +1,34 @@
+float:
+  any:
+  - base_args: ['@metric']
+    constructor: ChronoVec
+    disabled: false
+    docker_tag: chronovec
+    singularity_image: chronovec
+    module: vibe.algorithms.chronovec
+    name: chronovec
+    run_groups:
+      # Page capacity is the build parameter. It is swept because how it sits
+      # against the data's own cluster structure moves recall per probe
+      # substantially, and one value would report that guess rather than the
+      # index. nprobe is the query parameter and produces the recall/QPS curve.
+      cap-128:
+        args:
+          page_capacity: [128]
+        query_args:
+          nprobe: [4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256]
+      cap-256:
+        args:
+          page_capacity: [256]
+        query_args:
+          nprobe: [4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256]
+      cap-512:
+        args:
+          page_capacity: [512]
+        query_args:
+          nprobe: [2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192]
+      cap-1024:
+        args:
+          page_capacity: [1024]
+        query_args:
+          nprobe: [1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128]

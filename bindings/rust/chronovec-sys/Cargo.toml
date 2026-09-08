@@ -1,0 +1,15 @@
+[package]
+name = "chronovec-sys"
+version = "1.0.0"
+edition = "2021"
+description = "Raw FFI bindings to the ChronoVec C ABI"
+license = "Apache-2.0"
+repository = "https://github.com/mchl-labs/chronovec"
+homepage = "https://github.com/mchl-labs/chronovec"
+links = "chronovec"
+build = "build.rs"
+
+[dependencies]
+
+[build-dependencies]
+cmake = "0.1"

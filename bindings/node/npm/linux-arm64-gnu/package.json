@@ -1,0 +1,27 @@
+{
+  "name": "@chronovec/native-linux-arm64-gnu",
+  "version": "1.0.0",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "chronovec.linux-arm64-gnu.node",
+  "files": [
+    "chronovec.linux-arm64-gnu.node"
+  ],
+  "description": "Node.js native addon for ChronoVec: raw Index tier and ergonomic Collection, via napi-rs over the Rust crate",
+  "license": "Apache-2.0",
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mchl-labs/chronovec.git",
+    "directory": "bindings/node"
+  }
+}

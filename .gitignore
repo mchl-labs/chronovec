@@ -1,0 +1,40 @@
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+build-*/
+.benchmark-build/
+benchmark_data/
+
+# Rust/cargo build output: was accidentally tracked (410 files); see the
+# commit that removed it from the index for how this was cleaned up.
+target/
+__pycache__/
+*.py[cod]
+.coverage
+.coverage.*
+htmlcov/
+dist/
+_skbuild/
+
+# VitePress dependencies for the root docs site.
+node_modules/
+
+# internal reference docs, not for public consumption
+docs/internal/
+
+# benchmark and experiment results are internal measurement data
+benchmark_results/
+experiments/results/
+results/
+
+# Node native addon: platform-specific compiled binary + npm deps.
+# index.js/index.d.ts and package-lock.json are committed -- the former are
+# the deterministic API contract (useful to browse without a build step,
+# unlike the binary), the latter is for reproducible CI installs.
+bindings/node/node_modules/
+bindings/node/*.node
+# napi prepublish copies the built binary into its per-platform package
+# during the publish job; the package.json/README.md scaffolding for each
+# is committed (npm/*/package.json), the binary itself is not.
+bindings/node/npm/*/*.node

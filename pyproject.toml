@@ -1,0 +1,98 @@
+[build-system]
+requires = ["scikit-build-core>=0.9", "numpy>=1.26"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "chronovec"
+version = "1.0.0"
+description = "Vector memory for data that changes"
+authors = [
+  { name = "mchl-labs", email = "mchl-labs@outlook.com" },
+]
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+keywords = ["vector-search", "ann", "mvcc", "agent-memory", "rag", "vector-database"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Database",
+]
+dependencies = ["numpy>=1.26"]
+
+[project.urls]
+Homepage = "https://github.com/mchl-labs/chronovec"
+Documentation = "https://github.com/mchl-labs/chronovec/tree/main/docs"
+Issues = "https://github.com/mchl-labs/chronovec/issues"
+
+[project.scripts]
+chronovec = "chronovec.cli:main"
+
+[project.optional-dependencies]
+sentence-transformers = ["sentence-transformers>=3.0"]
+litellm = ["litellm>=1.60"]
+# Convenience bundle for trying every embedding adapter; prefer the specific
+# extra above when you only need one, since sentence-transformers pulls in a
+# full ML runtime (PyTorch) that a hosted-provider-only user doesn't need.
+embeddings = ["sentence-transformers>=3.0", "litellm>=1.60"]
+duckdb = ["duckdb>=1.0"]
+integrations = ["langchain-core>=0.3", "llama-index-core>=0.11"]
+langgraph = ["langgraph>=0.2"]
+test = ["pytest>=8", "pytest-cov"]
+test-extra = ["pyyaml"]
+# streambench compares against whatever is installed and skips the rest
+benchmarks = ["h5py", "hnswlib", "faiss-cpu", "usearch", "chromadb", "qdrant-client"]
+dev = [
+  "pytest>=8",
+  "pytest-cov",
+  "ruff>=0.4",
+  "mypy>=1.10",
+  "langchain-core>=0.3",
+  "llama-index-core>=0.11",
+  "pyyaml",
+]
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+# Include the chronovec Python package alongside the compiled library.
+wheel.packages = ["chronovec"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# tests/invariants.py is a helper the ACID and MVCC suites import directly.
+pythonpath = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+  "E501",   # line length handled by formatter
+  "B008",   # function calls in default arguments (common in our API)
+  "SIM108", # ternary instead of if-else (readability preference)
+  "B017",   # pytest.raises(Exception) is common in test suites
+  "E402",   # module-level imports not at top; expected after pytest.importorskip
+  # Pre-existing style in test files, to be cleaned up in a future pass:
+  "SIM105", # contextlib.suppress vs try/except/pass
+  "SIM117", # nested with statements
+  "E702",   # multiple statements on one line
+  "B018",   # useless expressions used to suppress unused-import warnings
+  "E731",   # lambda assignment
+  "B905",   # zip() without strict=
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true

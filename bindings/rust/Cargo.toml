@@ -1,0 +1,3 @@
+[workspace]
+members = ["chronovec-sys", "chronovec"]
+resolver = "2"

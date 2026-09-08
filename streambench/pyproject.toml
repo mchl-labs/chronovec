@@ -1,0 +1,25 @@
+[project]
+name = "streambench"
+version = "0.1.0"
+description = "A benchmark for vector indexes whose data changes"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+keywords = ["vector search", "ann", "benchmark", "streaming", "dynamic index"]
+dependencies = ["numpy>=1.24", "h5py>=3.8"]
+
+[project.optional-dependencies]
+chronovec = ["chronovec"]
+hnswlib = ["hnswlib"]
+faiss = ["faiss-cpu"]
+usearch = ["usearch"]
+chroma = ["chromadb"]
+annoy = ["annoy"]
+all = ["hnswlib", "faiss-cpu", "usearch", "chromadb", "annoy"]
+
+[project.scripts]
+streambench = "streambench.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

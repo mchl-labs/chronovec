@@ -1,0 +1,380 @@
+name: publish
+
+# Publishes new package versions to PyPI, crates.io, and npm. Gated to
+# push-to-main only: both the trigger and a job-level `if` (belt-and-
+# suspenders: the second check still holds even if this workflow's trigger
+# is ever reused or copied elsewhere with a wider trigger).
+#
+# Each job is idempotent and safe to run on every push to main: it checks
+# whether the version declared in the manifest is already on the registry
+# and skips the actual publish if so, rather than gating on which files
+# changed. A version bump is what triggers a real publish, not the push
+# itself.
+#
+# PyPI and npm both publish via OIDC trusted publishing -- no stored token,
+# just a trusted publisher configured at the registry pointing at this repo
+# + workflow (+ the "pypi" environment, for PyPI specifically). crates.io
+# has no such mechanism yet, so publish-rust-sys/publish-rust still need the
+# CARGO_REGISTRY_TOKEN repo secret set with `gh secret set`, or they'll fail
+# authentication rather than silently skip.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-python-wheels:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ${{ matrix.os }}
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cibw_build: "cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64"
+            cibw_archs: "x86_64"
+            artifact: python-wheels-linux-x86_64
+          - os: macos-14
+            cibw_build: "cp311-macosx_arm64 cp312-macosx_arm64 cp313-macosx_arm64"
+            cibw_archs: "arm64"
+            artifact: python-wheels-macos-arm64
+          - os: windows-latest
+            cibw_build: "cp311-win_amd64 cp312-win_amd64 cp313-win_amd64"
+            cibw_archs: "AMD64"
+            artifact: python-wheels-windows-amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pypa/cibuildwheel@v4.2.1
+        env:
+          CIBW_BUILD: ${{ matrix.cibw_build }}
+          CIBW_ARCHS: ${{ matrix.cibw_archs }}
+          CIBW_BEFORE_ALL_MACOS: brew install sqlite
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_TEST_COMMAND: >-
+            python -c "from chronovec import Collection; c = Collection(dimensions=3);
+            c.add(ids=['smoke'], embeddings=[[1, 0, 0]], documents=['wheel smoke']);
+            assert c.query([1, 0, 0], k=1)[0].id == 'smoke'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  publish-python:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: build-python-wheels
+    environment: pypi
+    permissions:
+      contents: read # An explicit `permissions:` block replaces the default
+                     # grant rather than adding to it, so checkout needs this
+                     # spelled out here or it fails "repository not found"
+                     # on a private repo.
+      id-token: write # PyPI trusted publishing (OIDC); no stored token needed.
+                       # Configure this at pypi.org/manage/project/chronovec/settings/publishing/
+                       # pointing at this repo + workflow + the "pypi" environment.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check whether this version is already on PyPI
+        id: check
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if curl -sf "https://pypi.org/pypi/chronovec/$VERSION/json" > /dev/null; then
+            echo "PyPI already has chronovec $VERSION, nothing to do."
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install system dependencies
+        if: steps.check.outputs.already_published == 'false'
+        run: sudo apt-get update && sudo apt-get install -y cmake g++
+
+      - name: Build source distribution
+        if: steps.check.outputs.already_published == 'false'
+        # The sdist remains useful as a fallback for unsupported platforms;
+        # the matrix job above supplies prebuilt wheels for common platforms.
+        run: python -m pip install build && python -m build --sdist
+
+      - name: Download platform wheels
+        if: steps.check.outputs.already_published == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: python-wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        if: steps.check.outputs.already_published == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+
+  publish-rust-sys:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check whether chronovec-sys is already published
+        id: check
+        working-directory: bindings/rust
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 | python -c "import json,sys; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='chronovec-sys'))")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # crates.io returns 403 for requests with curl's generic default
+          # User-Agent (an anti-scraping policy, documented at
+          # crates.io/data-access) -- curl -f then treats that as "check
+          # failed" and this misread it as "not published", triggering a
+          # redundant publish attempt that then correctly failed with
+          # "already exists". A descriptive User-Agent is all crates.io asks
+          # for.
+          if curl -sf -A "chronovec-ci (https://github.com/mchl-labs/chronovec)" "https://crates.io/api/v1/crates/chronovec-sys/$VERSION" > /dev/null; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish chronovec-sys
+        if: steps.check.outputs.already_published == 'false'
+        working-directory: bindings/rust
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --manifest-path chronovec-sys/Cargo.toml --locked
+
+  publish-rust:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    needs: publish-rust-sys
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Wait for crates.io index propagation
+        run: sleep 30
+      - name: Check whether chronovec is already published
+        id: check
+        working-directory: bindings/rust
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 | python -c "import json,sys; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='chronovec'))")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # See publish-rust-sys's identical note: crates.io 403s a request
+          # with curl's generic default User-Agent.
+          if curl -sf -A "chronovec-ci (https://github.com/mchl-labs/chronovec)" "https://crates.io/api/v1/crates/chronovec/$VERSION" > /dev/null; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish chronovec
+        if: steps.check.outputs.already_published == 'false'
+        working-directory: bindings/rust
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --manifest-path chronovec/Cargo.toml --locked
+
+  check-node-version:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      already_published: ${{ steps.check.outputs.already_published }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          VERSION=$(node -p "require('./bindings/node/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if npm view "@chronovec/native@$VERSION" version >/dev/null 2>&1; then
+            echo "npm already has @chronovec/native@$VERSION, nothing to do."
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-node-addon:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    needs: check-node-version
+    if: needs.check-node-version.outputs.already_published == 'false'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners only: no cross-compilation of the C++ core.
+          # No Intel Mac entry: GitHub no longer offers a hosted Intel macOS
+          # runner (macos-13 and earlier were removed), so darwin-x64 isn't
+          # buildable without cross-compiling the C++ core, which Apple's
+          # toolchain can technically do from Apple Silicon but which this
+          # matrix deliberately doesn't attempt; revisit if Intel Mac
+          # support turns out to matter.
+          - os: macos-14
+            platform_dir: darwin-arm64
+          - os: ubuntu-latest
+            platform_dir: linux-x64-gnu
+          - os: ubuntu-24.04-arm
+            platform_dir: linux-arm64-gnu
+          - os: windows-latest
+            platform_dir: win32-x64-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake g++
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake
+      # Windows runners come with cmake and the MSVC toolchain preinstalled.
+      - name: Build native library
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCHRONOVEC_BUILD_SQLITE=OFF && cmake --build build -j 2 --config Release
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: npm install
+        working-directory: bindings/node
+        run: npm install
+      - name: Build native addon
+        working-directory: bindings/node
+        run: npm run build
+        env:
+          # CMake's multi-config generator on Windows puts build output
+          # under build/Release/ (see the Stage step below, which already
+          # accounts for this for the .dll) -- the link step here needs the
+          # same path to find chronovec.lib, or it fails LNK1181 "cannot
+          # open input file 'chronovec.lib'". Single-config generators
+          # (Linux/macOS Makefiles) put it directly under build/.
+          CHRONOVEC_LIB_DIR: ${{ runner.os == 'Windows' && format('{0}/build/Release', github.workspace) || format('{0}/build', github.workspace) }}
+      - name: Stage native runtime library
+        shell: bash
+        run: |
+          set -eu
+          case "${RUNNER_OS}" in
+            macOS) cp build/libchronovec.dylib bindings/node/ ;;
+            Linux) cp build/libchronovec.so bindings/node/ ;;
+            Windows) cp build/Release/chronovec.dll bindings/node/ ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: napi-binary-${{ matrix.platform_dir }}
+          path: |
+            bindings/node/*.node
+            bindings/node/libchronovec.*
+            bindings/node/chronovec.dll
+          if-no-files-found: error
+
+  publish-node:
+    needs: [check-node-version, build-node-addon]
+    if: needs.check-node-version.outputs.already_published == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # see publish-python's identical note: an explicit
+                     # permissions: block replaces the default grant, so
+                     # checkout needs this spelled out or it fails on a
+                     # private repo.
+      id-token: write # npm trusted publishing (OIDC) -- no stored token
+                       # needed once each package has a trusted publisher
+                       # configured at npmjs.com pointing at this repo +
+                       # workflow. Requires npm >= 11.5.1 (see below);
+                       # Node 20's bundled npm predates OIDC support.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+      - name: Upgrade npm for OIDC trusted-publishing support
+        # Pinned to an 11.x range, not `@latest`: `latest` is non-reproducible
+        # and could break unexpectedly if a future npm major drops support
+        # for Node 20 (already past its own EOL) before this workflow is
+        # updated. OIDC trusted publishing only needs >= 11.5.1.
+        run: npm install -g npm@^11.5.1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: napi-binary-*
+          path: bindings/node/artifacts
+
+      - name: Move each built binary into its platform package
+        working-directory: bindings/node
+        run: |
+          set -eu
+          for dir in artifacts/napi-binary-*/; do
+            platform="$(basename "$dir" | sed 's/^napi-binary-//')"
+            target="npm/$platform"
+            if [ ! -d "$target" ]; then
+              echo "no npm/$platform directory for artifact $dir" >&2
+              exit 1
+            fi
+            cp "$dir"*.node "$target/"
+            cp "$dir"libchronovec.* "$target/" 2>/dev/null || true
+            cp "$dir"chronovec.dll "$target/" 2>/dev/null || true
+          done
+
+      - name: Sync platform package versions and root optionalDependencies
+        working-directory: bindings/node
+        # The platform package.json files and the root's optionalDependencies
+        # block are committed with whatever version they had at that commit,
+        # not necessarily today's; this makes the mismatch impossible rather
+        # than relying on a human remembering to bump five files by hand on
+        # every version change.
+        run: node scripts/sync-versions.js
+
+      - name: Publish each platform package
+        working-directory: bindings/node
+        # No NODE_AUTH_TOKEN: each package has a trusted publisher configured
+        # at npmjs.com (repo + this workflow), so npm exchanges the OIDC
+        # token this job's id-token: write permission provides for a
+        # short-lived publish credential automatically.
+        #
+        # Checked per-package before publishing, unlike a naive loop: if a
+        # prior run publishes some packages and then fails on (or is missing
+        # a trusted publisher for) another, a bare `npm publish` on the
+        # already-published ones would hit "cannot publish over previously
+        # published version" and abort the whole loop under `set -e` before
+        # reaching the packages that still need it -- exactly the shape a
+        # per-package trusted-publisher misconfiguration produces, which is
+        # 5 separate things to get right here, not one.
+        run: |
+          set -eu
+          for dir in npm/*/; do
+            name="$(node -p "require('./$dir/package.json').name")"
+            version="$(node -p "require('./$dir/package.json').version")"
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already published, skipping."
+              continue
+            fi
+            echo "Publishing $name@$version"
+            npm publish "$dir"
+          done
+
+      - name: Publish the root package
+        working-directory: bindings/node
+        # index.js/index.d.ts are already committed (see .gitignore's note on
+        # why); the root package has no native binary of its own, only
+        # optionalDependencies on the platform packages just published above.
+        # Same idempotency reasoning as the platform packages above.
+        run: |
+          set -eu
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version already published, skipping."
+          else
+            npm publish
+          fi

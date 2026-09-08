@@ -1,0 +1,205 @@
+{
+  "enum_values": {
+    "CV_COSINE": 0,
+    "CV_ENABLE_ADAPTIVE_BOUNDS": 2,
+    "CV_ENABLE_INT8_SCREENING": 1,
+    "CV_ENABLE_LABELS": 4,
+    "CV_ENABLE_LABEL_PARTITION": 8,
+    "CV_L2": 1,
+    "CV_SEARCH_ADAPTIVE": 1,
+    "CV_SEARCH_LINEAR_ROUTING": 2
+  },
+  "functions": {
+    "__declspec": "__declspec(dllexport) #else #define CV_API __attribute__((visibility(\"default\"))) #endif #define CV_ABI_VERSION_MAJOR 0 #define CV_ABI_VERSION_MINOR 1 #define CV_ABI_VERSION_PATCH 0 #define CV_ABI_VERSION \\ ((CV_ABI_VERSION_MAJOR << 16) | (CV_ABI_VERSION_MINOR << 8) | CV_ABI_VERSION_PATCH) #ifdef __cplusplus extern \"C\" { #endif typedef struct cv_index cv_index",
+    "cv_apply_changes": "int cv_apply_changes(cv_index *index, const int64_t *delete_ids, size_t delete_count, const int64_t *upsert_ids, const float *upsert_vectors, size_t upsert_count, uint64_t *committed_timestamp)",
+    "cv_clock": "uint64_t cv_clock(const cv_index *index)",
+    "cv_create": "cv_index *cv_create(size_t dimensions, int metric, size_t page_capacity, size_t nprobe)",
+    "cv_create_disk_backed": "cv_index *cv_create_disk_backed(size_t dimensions, int metric, size_t page_capacity, size_t nprobe, uint32_t flags, size_t rerank_factor, const char *arena_path, size_t max_vectors)",
+    "cv_create_with_options": "cv_index *cv_create_with_options(size_t dimensions, int metric, size_t page_capacity, size_t nprobe, uint32_t flags, size_t rerank_factor)",
+    "cv_create_with_wal": "cv_index *cv_create_with_wal(size_t dimensions, int metric, size_t page_capacity, size_t nprobe, uint32_t flags, size_t rerank_factor, const char *wal_path, int sync_on_commit, const char *arena_path, size_t max_vectors)",
+    "cv_default_nprobe": "size_t cv_default_nprobe(const cv_index *index)",
+    "cv_delete": "int cv_delete(cv_index *index, int64_t id, uint64_t timestamp, uint64_t *committed_timestamp)",
+    "cv_delete_batch": "size_t cv_delete_batch(cv_index *index, const int64_t *ids, size_t count, uint64_t *committed_timestamp)",
+    "cv_destroy": "void cv_destroy(cv_index *index)",
+    "cv_dimensions": "size_t cv_dimensions(const cv_index *index)",
+    "cv_exact_search_f32": "size_t cv_exact_search_f32(const float *vectors, const int64_t *ids, size_t count, size_t dimensions, int metric, const float *query, size_t k, int64_t *out_ids, float *out_distances)",
+    "cv_flags": "uint32_t cv_flags(const cv_index *index)",
+    "cv_flush_vectors": "size_t cv_flush_vectors(cv_index *index)",
+    "cv_get_last_search_metrics": "int cv_get_last_search_metrics(cv_search_metrics *out)",
+    "cv_get_stats": "int cv_get_stats(const cv_index *index, cv_stats *out)",
+    "cv_insert": "int cv_insert(cv_index *index, int64_t id, const float *vector, uint64_t timestamp, uint64_t *committed_timestamp)",
+    "cv_insert_batch": "size_t cv_insert_batch(cv_index *index, const int64_t *ids, const float *vectors, size_t count, uint64_t *committed_timestamp)",
+    "cv_insert_batch_labeled": "size_t cv_insert_batch_labeled(cv_index *index, const int64_t *ids, const float *vectors, const uint64_t *labels, size_t count, uint64_t *committed)",
+    "cv_insert_labeled": "int cv_insert_labeled(cv_index *index, int64_t id, const float *vector, uint64_t label, uint64_t timestamp, uint64_t *committed_timestamp)",
+    "cv_last_error": "const char *cv_last_error(void)",
+    "cv_load_checkpoint": "cv_index *cv_load_checkpoint(const char *path)",
+    "cv_metric": "int cv_metric(const cv_index *index)",
+    "cv_page_capacity": "size_t cv_page_capacity(const cv_index *index)",
+    "cv_page_label_profile": "size_t cv_page_label_profile(const cv_index *index, const cv_filter *filter, uint64_t snapshot, uint32_t *out_live, uint32_t *out_matching, size_t max_pages)",
+    "cv_rerank_factor": "size_t cv_rerank_factor(const cv_index *index)",
+    "cv_save_checkpoint": "int cv_save_checkpoint(cv_index *index, const char *path)",
+    "cv_search": "size_t cv_search(cv_index *index, const float *query, size_t k, uint64_t snapshot, size_t nprobe, int64_t *out_ids, float *out_distances)",
+    "cv_search_batch": "size_t cv_search_batch(cv_index *index, const float *queries, size_t count, size_t k, uint64_t snapshot, size_t nprobe, uint32_t search_flags, int64_t *out_ids, float *out_distances, size_t *out_found)",
+    "cv_search_filtered": "size_t cv_search_filtered(cv_index *index, const float *query, size_t k, uint64_t snapshot, size_t nprobe, uint32_t search_flags, const cv_filter *filter, int64_t *out_ids, float *out_distances)",
+    "cv_search_with_options": "size_t cv_search_with_options(cv_index *index, const float *query, size_t k, uint64_t snapshot, size_t nprobe, uint32_t search_flags, int64_t *out_ids, float *out_distances)",
+    "cv_set_auto_consolidate": "void cv_set_auto_consolidate(cv_index *index, int enabled)",
+    "cv_set_threads": "void cv_set_threads(cv_index *index, size_t lanes)",
+    "cv_vacuum": "size_t cv_vacuum(cv_index *index, uint64_t oldest_snapshot, size_t budget_versions)",
+    "cv_version": "cv_version_t cv_version(void)"
+  },
+  "structs": {
+    "cv_filter": [
+      [
+        "uint64_t",
+        "require_all"
+      ],
+      [
+        "uint64_t",
+        "require_any"
+      ],
+      [
+        "uint64_t",
+        "exclude"
+      ]
+    ],
+    "cv_search_metrics": [
+      [
+        "uint64_t",
+        "directory_pages"
+      ],
+      [
+        "uint64_t",
+        "centroid_scores"
+      ],
+      [
+        "uint64_t",
+        "routed_pages"
+      ],
+      [
+        "uint64_t",
+        "physical_candidates"
+      ],
+      [
+        "uint64_t",
+        "visible_candidates"
+      ],
+      [
+        "uint64_t",
+        "mvcc_filtered"
+      ],
+      [
+        "uint64_t",
+        "sketch_scores"
+      ],
+      [
+        "uint64_t",
+        "exact_scores"
+      ],
+      [
+        "uint64_t",
+        "result_count"
+      ],
+      [
+        "uint64_t",
+        "bound_pruned_pages"
+      ],
+      [
+        "uint64_t",
+        "preparation_ns"
+      ],
+      [
+        "uint64_t",
+        "routing_ns"
+      ],
+      [
+        "uint64_t",
+        "screening_ns"
+      ],
+      [
+        "uint64_t",
+        "rerank_ns"
+      ],
+      [
+        "uint64_t",
+        "result_materialization_ns"
+      ],
+      [
+        "uint64_t",
+        "total_ns"
+      ]
+    ],
+    "cv_stats": [
+      [
+        "uint64_t",
+        "clock"
+      ],
+      [
+        "uint64_t",
+        "pages"
+      ],
+      [
+        "uint64_t",
+        "live_vectors"
+      ],
+      [
+        "uint64_t",
+        "retained_versions"
+      ],
+      [
+        "uint64_t",
+        "allocated_slots"
+      ],
+      [
+        "uint64_t",
+        "splits"
+      ],
+      [
+        "uint64_t",
+        "reclaimed_versions"
+      ],
+      [
+        "uint64_t",
+        "merges"
+      ],
+      [
+        "uint64_t",
+        "routing_full_rebuilds"
+      ],
+      [
+        "uint64_t",
+        "routing_incremental_updates"
+      ],
+      [
+        "uint64_t",
+        "routing_centroid_bytes"
+      ],
+      [
+        "uint64_t",
+        "routing_edge_count"
+      ]
+    ],
+    "cv_version_t": [
+      [
+        "uint8_t",
+        "major"
+      ],
+      [
+        "uint8_t",
+        "minor"
+      ],
+      [
+        "uint8_t",
+        "patch"
+      ],
+      [
+        "uint8_t",
+        "reserved"
+      ]
+    ]
+  },
+  "version": {
+    "MAJOR": 0,
+    "MINOR": 1,
+    "PATCH": 0
+  }
+}

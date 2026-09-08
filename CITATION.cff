@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: "ChronoVec: A Versioned Vector Index with Snapshot Isolation"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - given-names: "Michael"
+    family-names: "Rottoli"
+    website: "https://github.com/mchl-labs/chronovec"
+repository-code: "https://github.com/mchl-labs/chronovec"
+abstract: >-
+  ChronoVec is a versioned approximate-nearest-neighbour index for collections
+  that change over time. Snapshot-isolated queries read a consistent
+  point-in-time view while writes continue concurrently. MVCC version intervals
+  support historical retrieval, and bounded reclamation physically removes
+  expired versions incrementally without requiring a full index rebuild.
+keywords:
+  - approximate nearest neighbour
+  - vector search
+  - multiversion concurrency control
+  - streaming index
+  - agent memory
+version: 1.0.0
+date-released: "2026-09-07"

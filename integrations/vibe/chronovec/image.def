@@ -1,0 +1,11 @@
+Bootstrap: localimage
+From: base.sif
+
+%post
+  apt-get update -y && apt-get install -y --no-install-recommends cmake build-essential
+  # Accelerate is macOS-only; on the benchmark's Linux images the batched
+  # assignment uses a system BLAS when one is present and a blocked scalar
+  # fallback when it is not. Neither affects query results.
+  apt-get install -y --no-install-recommends libopenblas-dev
+  pip install --no-cache-dir chronovec==0.1.0
+  rm -rf /var/lib/apt/lists/*

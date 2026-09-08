@@ -1,0 +1,293 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows-native:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure native core
+        run: cmake -S . -B build -DCHRONOVEC_BUILD_SQLITE=OFF
+      - name: Build and test native C ABI
+        run: cmake --build build --config Release && ctest --test-dir build -C Release --output-on-failure
+
+  build-and-test:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install system dependencies
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y cmake g++ libsqlite3-dev
+          else
+            brew install sqlite
+          fi
+      - name: Install Python test dependencies
+        run: python -m pip install -e ".[test,duckdb]" ruff
+      - name: Lint
+        run: python -m ruff check chronovec/ tests/ && python -m ruff format --check chronovec/ tests/
+      - name: Build native libraries
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j 2
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure && python -m pytest -q --tb=short
+      - name: Typecheck primary Python package
+        if: matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest'
+        run: python -m pip install mypy && python -m mypy chronovec/ --ignore-missing-imports
+      - name: Run tests with coverage (Python 3.12 Ubuntu only)
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+        run: python -m pip install pytest-cov && python -m pytest -q --cov=chronovec --cov-report=term-missing
+
+  sanitizers:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compiler
+        run: sudo apt-get update && sudo apt-get install -y cmake clang
+      - name: Configure ASan and UBSan
+        run: cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCHRONOVEC_BUILD_SQLITE=OFF -DCHRONOVEC_SANITIZE_ADDRESS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+      - name: Build and test
+        run: cmake --build build-sanitize -j 2 && ctest --test-dir build-sanitize --output-on-failure
+      - name: Configure ThreadSanitizer
+        run: cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCHRONOVEC_BUILD_SQLITE=OFF -DCHRONOVEC_SANITIZE_THREAD=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+      - name: Run ThreadSanitizer smoke tests
+        run: cmake --build build-tsan -j 2 && ctest --test-dir build-tsan --output-on-failure
+      - name: Build and exercise C-ABI fuzzer
+        run: cmake -S . -B build-fuzz -DCHRONOVEC_BUILD_SQLITE=OFF -DCHRONOVEC_BUILD_FUZZER=ON -DCHRONOVEC_SANITIZE_ADDRESS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ && cmake --build build-fuzz -j 2 && ./build-fuzz/chronovec_fuzz -runs=10000
+
+  abi-gate:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check the C ABI header against the committed baseline
+        # Pure text parsing over the bundled C ABI header -- no build needed.
+        # Fails only on a breaking change (removed/changed function, struct, or
+        # enum value) that didn't bump CV_ABI_VERSION_MAJOR. Every language
+        # binding (Rust, Go, Node) links against this header, so a silent
+        # break here breaks all of them.
+        run: python tools/abi_gate.py
+
+  rust-bindings:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++
+      - name: Build the native library the bindings link against
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCHRONOVEC_BUILD_SQLITE=OFF && cmake --build build -j 2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+        working-directory: bindings/rust
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: bindings/rust
+        env:
+          CHRONOVEC_LIB_DIR: ${{ github.workspace }}/build
+      - name: Test
+        # Was missing entirely -- this job built and ran the example but never
+        # ran the crate's own tests, so chronovec::collection's unit tests and
+        # doctests (stable_id cross-language hash parity, the filter DSL, the
+        # concurrency-safe locking) had no CI enforcement.
+        run: cargo test --all-targets
+        working-directory: bindings/rust
+        env:
+          CHRONOVEC_LIB_DIR: ${{ github.workspace }}/build
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build
+      - name: Build and run the example
+        run: cargo run --example time_travel
+        working-directory: bindings/rust/chronovec
+        env:
+          CHRONOVEC_LIB_DIR: ${{ github.workspace }}/build
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build
+
+  go-bindings:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++
+      - name: Build the native library the bindings link against
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCHRONOVEC_BUILD_SQLITE=OFF && cmake --build build -j 2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Vet
+        run: go vet ./...
+        working-directory: bindings/go
+      - name: Format check
+        run: test -z "$(gofmt -l .)"
+        working-directory: bindings/go
+      - name: Test
+        run: go test ./...
+        working-directory: bindings/go
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build
+
+  node-bindings:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++
+      - name: Build the native library the bindings link against
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCHRONOVEC_BUILD_SQLITE=OFF && cmake --build build -j 2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check formatting
+        run: cargo fmt --all --check
+        working-directory: bindings/node
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: bindings/node
+        env:
+          CHRONOVEC_LIB_DIR: ${{ github.workspace }}/build
+      - name: npm install
+        run: npm install
+        working-directory: bindings/node
+      - name: Build the native addon
+        run: npm run build:debug
+        working-directory: bindings/node
+        env:
+          CHRONOVEC_LIB_DIR: ${{ github.workspace }}/build
+      - name: Test
+        # LD_LIBRARY_PATH works fine through npm's spawn chain on Linux --
+        # the DYLD_* stripping documented in docs/integrations/node.md as a
+        # local-macOS caveat is a macOS/SIP behavior, not a Linux one.
+        run: npm test
+        working-directory: bindings/node
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build
+
+  regression-gate:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # compare_revisions.py checks out the base commit into a git
+          # worktree, which needs that commit present locally -- the default
+          # shallow (depth-1) checkout would only have HEAD.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++
+      - name: Install uv and numpy
+        # compare_revisions.py runs the actual measurement via `uv run --with
+        # h5py`, which resolves each revision's own project (and h5py, not a
+        # base dependency) into an ephemeral venv per worktree -- this runner
+        # itself never touches chronovec or h5py. It does need numpy: just
+        # importing compare_revisions.py pulls in regression_gate.py (for
+        # host_identity()), which imports numpy unconditionally at module
+        # scope even though host_identity() itself never uses it.
+        run: python -m pip install uv numpy
+      - name: Cache benchmark dataset
+        id: dataset-cache
+        uses: actions/cache@v4
+        with:
+          path: benchmark_data/sift-128-euclidean.hdf5
+          key: benchmark-data-sift-128-euclidean-v1
+      - name: Fetch benchmark dataset
+        if: steps.dataset-cache.outputs.cache-hit != 'true'
+        run: python benchmarks/fetch_datasets.py sift-128-euclidean
+      - name: Determine comparison base
+        id: base
+        # A candidate ref must actually resolve to a commit before it's used:
+        # HEAD~1 doesn't exist on a repo's very first commit (hit exactly
+        # this running against chronovec's initial squashed commit), and a
+        # force-pushed or otherwise rewritten `before` SHA can point at a
+        # commit this checkout no longer has. Either leaves nothing to
+        # compare against -- that's not a failure, just nothing to gate yet.
+        run: |
+          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+            candidate="${{ github.event.pull_request.base.sha }}"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            candidate="${{ github.event.before }}"
+          else
+            candidate="HEAD~1"
+          fi
+          if git rev-parse --verify --quiet "${candidate}^{commit}" > /dev/null; then
+            echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Compare base revision against current tree, same host
+        # Same-host by construction: builds and measures the base commit in a
+        # temporary worktree, then the current tree, back-to-back on this
+        # exact runner. This replaces comparing against the committed static
+        # baseline, which was recorded on a developer's Mac and would forever
+        # print "untrusted" for every timing metric against a Linux CI runner
+        # (see regression_gate.py's host-mismatch handling) -- there is no
+        # cross-machine gap here for a calibration probe to paper over.
+        # Deterministic metrics (recall, fill, space) are still judged
+        # exactly as strictly as before.
+        if: steps.base.outputs.available == 'true'
+        run: python benchmarks/compare_revisions.py --base "${{ steps.base.outputs.sha }}"
+      - name: No prior commit to compare against
+        if: steps.base.outputs.available == 'false'
+        run: echo "No prior commit available yet (e.g. the repo's first commit) -- nothing to gate against on this run."
+
+  framework-adapters:
+    permissions:
+      contents: read # checkout is all this job does with the repo,
+                     # it never needs write access.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libsqlite3-dev
+      - name: Build native library
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j 2
+      - name: Install the real frameworks
+        run: python -m pip install -e ".[test]" langchain-core llama-index-core
+      - name: Verify adapters against the actual interfaces
+        run: python -m pytest tests/test_memory.py tests/test_integrations.py tests/test_langchain_integration.py tests/test_llamaindex_integration.py -q

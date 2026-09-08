@@ -1,0 +1,24 @@
+{
+  "name": "@chronovec/native-darwin-arm64",
+  "version": "1.0.0",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "chronovec.darwin-arm64.node",
+  "files": [
+    "chronovec.darwin-arm64.node"
+  ],
+  "description": "Node.js native addon for ChronoVec: raw Index tier and ergonomic Collection, via napi-rs over the Rust crate",
+  "license": "Apache-2.0",
+  "os": [
+    "darwin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mchl-labs/chronovec.git",
+    "directory": "bindings/node"
+  }
+}

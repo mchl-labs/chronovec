@@ -1,0 +1,39 @@
+{
+  "name": "@chronovec/native",
+  "version": "1.0.0",
+  "description": "Node.js native addon for ChronoVec: raw Index tier and ergonomic Collection, via napi-rs over the Rust crate",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mchl-labs/chronovec.git",
+    "directory": "bindings/node"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "binaryName": "chronovec",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3"
+  },
+  "optionalDependencies": {
+    "@chronovec/native-darwin-arm64": "1.0.0",
+    "@chronovec/native-linux-x64-gnu": "1.0.0",
+    "@chronovec/native-linux-arm64-gnu": "1.0.0",
+    "@chronovec/native-win32-x64-msvc": "1.0.0"
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "node --test __test__/index.test.js __test__/collection.test.js"
+  }
+}

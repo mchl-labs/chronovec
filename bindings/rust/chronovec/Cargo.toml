@@ -1,0 +1,23 @@
+[package]
+name = "chronovec"
+version = "1.0.0"
+edition = "2021"
+description = "Snapshot-isolated vector index with bounded reclamation"
+license = "Apache-2.0"
+repository = "https://github.com/mchl-labs/chronovec"
+homepage = "https://github.com/mchl-labs/chronovec"
+keywords = ["vector", "ann", "search", "embeddings", "mvcc"]
+categories = ["database-implementations", "algorithms"]
+
+[dependencies]
+chronovec-sys = { path = "../chronovec-sys", version = "1.0.0" }
+# Used only to reproduce chronovec.collection.stable_id() byte-for-byte, so a
+# string id hashed by the Python Collection and the Rust Collection resolve to
+# the same engine key. Verified against Python-generated reference vectors in
+# collection::tests::stable_id_matches_python.
+blake2 = "0.10"
+# Small, dependency-free regex engine for the $regex metadata filter operator
+# -- same operator Python's Collection.query(where=...) supports. The full
+# `regex` crate's Unicode tables are unneeded weight for matching metadata
+# strings, which is all this filter does.
+regex-lite = "0.1"
