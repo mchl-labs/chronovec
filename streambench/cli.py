@@ -32,6 +32,9 @@ def _run_isolated(engine: str, args: argparse.Namespace) -> dict:
     """Run one engine in a child process so a native crash cannot end the run."""
     import subprocess
     import sys
+    options = {}
+    if getattr(args, "label_partition", False):
+        options["label_partition"] = True
     spec = {"engine": engine, "dataset": args.dataset, "queries": args.queries,
             "metric": args.metric, "live": args.live, "epochs": args.epochs,
             "turnover": args.turnover, "seed": args.seed, "k": args.k,
@@ -40,7 +43,8 @@ def _run_isolated(engine: str, args: argparse.Namespace) -> dict:
             "churn_rounds": args.churn_rounds,
             "churn_fraction": args.churn_fraction,
             "layout": args.tag_layout,
-            "target_recall": args.target_recall}
+            "target_recall": args.target_recall,
+            "options": options}
     finished = subprocess.run([sys.executable, "-m", "streambench._worker",
                                json.dumps(spec)],
                               capture_output=True, text=True)
@@ -228,6 +232,7 @@ def _run_filtered(args: argparse.Namespace, base: np.ndarray,
     report = {"schema_version": 1,
               "workload": {"live_vectors": trace.live, "mode": "filtered",
                            "tag_layout": args.tag_layout,
+                           "label_partition": bool(args.label_partition),
                            "dimensions": int(base.shape[1]),
                            "metric": args.metric, "dataset": args.dataset,
                            "k": args.k, "queries": int(queries.shape[0])},
@@ -240,10 +245,11 @@ def _run_filtered(args: argparse.Namespace, base: np.ndarray,
           f"{args.tag_layout}, swept over how much of the corpus it matches"
           + (f", then {args.churn_rounds} rounds of "
              f"{args.churn_fraction:.0%} churn" if args.churn_rounds else "")
+          + (", chronovec in label-partition mode" if args.label_partition else "")
           + "\n")
     print("what each engine can actually do:")
     print(format_capability_matrix(args.engines) + "\n")
-    header = (f"{'engine':<15}{'mode':<8}{'match':>7}{'param':>7}"
+    header = (f"{'engine':<15}{'mode':<12}{'match':>7}{'param':>7}"
               f"{'recall':>9}{'short':>7}{'fetch':>8}{'p50 ms':>9}"
               f"{'p99 ms':>9}{'vs all':>8}")
     if args.churn_rounds:
@@ -255,10 +261,10 @@ def _run_filtered(args: argparse.Namespace, base: np.ndarray,
             continue
         for row in payload["selectivities"]:
             if "unsupported" in row:
-                print(f"{name:<15}{payload['filtering']:<8}"
+                print(f"{name:<15}{payload['filtering']:<12}"
                       f"{row['selectivity']:>6.0%}  {row['unsupported'][:40]}")
                 continue
-            line = (f"{name:<15}{payload['filtering']:<8}"
+            line = (f"{name:<15}{payload['filtering']:<12}"
                     f"{row['selectivity']:>6.0%}"
                     f"{row.get('search_param', 0):>7}"
                     + ("*" if not row.get("met_target", True) else " ")
@@ -361,6 +367,13 @@ def main(argv: list[str] | None = None) -> None:
                              "each one")
     parser.add_argument("--churn-fraction", type=float, default=0.25,
                         help="fraction of the live set replaced per churn round")
+    parser.add_argument("--label-partition", action="store_true",
+                        help="in --mode filtered, on chronovec, keep one label "
+                             "to a page instead of the default label-union "
+                             "skip. Costs at least one page per label but "
+                             "cuts how much filtered recall erodes under "
+                             "churn, since inserts can no longer scatter a "
+                             "label across more pages over time")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", default="")
     args = parser.parse_args(argv)
