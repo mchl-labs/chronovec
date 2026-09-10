@@ -90,6 +90,23 @@ Another place where ChronoVec's design shows a structural advantage, and, like t
 
 Every one of the three filtered-search patterns (chronovec leads or ties at every selectivity, hnswlib slows sharply under tight filters, faiss stays fast but under its recall target) holds at 500,000 live vectors, the largest scale tested in this campaign. hnswlib's slowdown gets an order of magnitude worse at each scale step (1% selectivity p50: 20.6ms at 50k, 18.0ms at 200k, 139.1ms at 500k), and faiss's recall shortfall at 1% selectivity widens too (76pts at 50k, 63.2pts at 200k, 80.0pts at 500k).
 
+### Filtered search recall under churn
+
+The two tables above are snapshot measurements: build once, measure once. They do not say what happens to filtered recall once the corpus starts mutating, which matters because chronovec's default filtered mode (`labels=True`) places inserts by geometry alone. A new record lands on its nearest page whether or not that page already carries the record's tag, so as churn replaces records over time, a tag that started out concentrated in a small set of pages can gradually spread into more of them. This was tried the other way once already and rejected on evidence: biasing placement toward same-tag pages was measured to cost about 11% query latency at equal recall for the general case, so it stays off by default (`LABEL_PLACEMENT_TOLERANCE = 0.0`, see the native source for the measurement it was rejected on).
+
+`label_partition=True` is the strict alternative that was already in the native layer for this reason: one label to a page, enforced on every insert. It had unit coverage for purity (`test_partitioning_survives_churn_and_vacuum`) but no recall numbers. `streambench --mode filtered` now takes a `--label-partition` flag to measure it directly, but that flag matches each mode to its own best probe setting per round the same way the two snapshot tables above do, and that matching adds noise to a churn comparison: a different round can land on a different rung of the search ladder, so a recall delta can move for reasons that have nothing to do with churn. Isolating the churn effect from that noise means holding the probe count fixed across rounds instead. SIFT-128, 200,000 live vectors, semantic tag layout, 10% selectivity, nprobe fixed at 96 for every round, 3 rounds of 25% churn (75% cumulative turnover), recall measured against exact ground truth on 300 queries:
+
+| mode | recall (fresh) | recall (after churn) | recall delta | pages truly holding the tag, fresh | pages truly holding the tag, after churn |
+|---|---:|---:|---:|---:|---:|
+| labels only | 0.885 | 0.803 | -0.082 | 797 of 1,174 | 1,233 of 2,053 |
+| label_partition | 1.000 | 0.996 | -0.004 | 105 of 1,047 | 206 of 2,053 |
+
+At a fixed probe budget the default mode loses 8.2 recall points to churn; `label_partition` loses 0.4, about 20x less. The page counts (from `page_label_profile`, an exact per-record scan, not the approximate label union that routing actually uses) show why: a filtered query's probe budget is a fixed number of pages, so the same budget covers a shrinking fraction of a growing eligible set under the default mode (797 to 1,233 pages, tracking the geometric scatter described above) and a much smaller, slower-growing fraction under `label_partition` (105 to 206 pages, out of a similarly sized directory: both runs land at 2,053 total pages after the same churn trace). `label_partition`'s eligible-page count still grows under churn, since deletes fragment existing same-label pages and a full one still splits or claims a fresh blank page, but that growth stays close to the label's own packing floor (roughly `live_matching / page_capacity`, about 78 pages here) rather than scattering across the wider directory the way the default mode's does.
+
+Capacity amplification was nearly identical between the two modes in a separate run at this scale (2.63 vs. 2.62), but that comparison only had two distinct label values (matching the filter or not); `label_partition`'s documented cost, a label costs at least one page whether it holds a million records or one, will show up once cardinality does, and was not tested here.
+
+Recommendation: for a filtered workload built around a small number of coarse tags with sustained churn, `label_partition=True` is the mitigation for recall erosion, at a page-floor cost that needs measuring against your own label cardinality before adopting it. The default (`labels=True` alone) is what the two snapshot tables above measure and remains the right choice for filtered search that is not under heavy churn, or where label cardinality is high enough that a per-label page floor would cost more than it buys.
+
 ---
 
 ## Operation-type breakdown

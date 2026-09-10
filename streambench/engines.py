@@ -215,6 +215,7 @@ class ChronoVecEngine(_Base):
     def __init__(self, dim: int, metric: str, nprobe: int = 96,
                  page_capacity: int = 256, maintenance_every: int = 64,
                  maintenance_budget: int = 64, threads: int = 1,
+                 label_partition: bool = False,
                  **_: Any) -> None:
         # Writers serialise behind one mutex, so the write path is
         # single-threaded whatever is asked for. Recorded, not silently ignored.
@@ -222,6 +223,11 @@ class ChronoVecEngine(_Base):
         from chronovec import Index
         self._dimensions, self._metric = dim, metric
         self._page_capacity = page_capacity
+        # Only used by build_filtered: strict mode is a filtered-search
+        # question, unlabelled builds have no partition to keep pure.
+        self._label_partition = bool(label_partition)
+        if self._label_partition:
+            self.filtering = "native-part"
         self._index = Index(dim, metric=metric, page_capacity=page_capacity,
                             nprobe=nprobe)
         self._nprobe = nprobe
@@ -272,7 +278,8 @@ class ChronoVecEngine(_Base):
         self._index.close()
         self._index = Index(self._dimensions, metric=self._metric,
                             page_capacity=self._page_capacity,
-                            nprobe=self._nprobe, labels=True)
+                            nprobe=self._nprobe, labels=True,
+                            label_partition=self._label_partition)
         self._index.insert_many(ids, vectors,
                                 labels=np.asarray(tags, dtype=np.uint64))
 

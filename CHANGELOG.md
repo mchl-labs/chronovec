@@ -2,6 +2,26 @@
 
 All notable changes are documented here.
 
+## Upcoming
+
+### Testing & Quality
+- `streambench --mode filtered` now takes `--label-partition`, so
+  `label_partition=True` (one label to a page, previously covered only by a
+  purity test) can be measured for recall instead of just correctness. At a
+  fixed probe budget (nprobe 96, no ladder rematching, which was adding noise
+  to an earlier pass at this measurement) the default filtered mode's recall
+  erodes under churn at 10% selectivity (0.885 fresh, 0.803 after 3 rounds of
+  25% churn on SIFT-128 at 200,000 live vectors) because insert placement is
+  geometry only, so a tag that started concentrated in a few pages spreads
+  into more of them as churn replaces records. `label_partition` loses about
+  20x less recall to the same churn trace (1.000 fresh, 0.996 after churn),
+  confirmed by an exact page count from `page_label_profile`: 1,233 of 2,053
+  pages truly carried the tag under the default mode versus 206 of 2,053
+  under `label_partition`. Documented in `docs/performance.md` under
+  "Filtered search recall under churn," along with the tradeoff: the
+  per-label page floor was not exercised by this measurement, since it used
+  only two label values.
+
 ## 1.0.0 (2026-09-07)
 
 First public release.
